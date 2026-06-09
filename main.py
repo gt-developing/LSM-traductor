@@ -1017,6 +1017,9 @@ def obtener_datos_tecnicos(texto, glosa):
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
+import os
+import random
+from glob import glob
 
 # =========================================================
 # NOTA: Asegúrate de tener declaradas tus funciones de LSM aquí arriba:
@@ -1036,7 +1039,40 @@ class TraductorLSMApp:
         self.root.configure(fg_color="white")
 
         self.tecnico_visible = False
+        self.avatar_frames = self.cargar_frames_avatar()
+        self.ultimo_avatar = None
         self.crear_interfaz()
+
+    def cargar_frames_avatar(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        patron = os.path.join(base_dir, "similar", "simibailando (*.png")
+        rutas = sorted(glob(patron))
+
+        frames = []
+        for ruta in rutas:
+            try:
+                frames.append(tk.PhotoImage(file=ruta))
+            except tk.TclError:
+                continue
+
+        return frames
+
+    def actualizar_frame_avatar(self):
+        if not self.avatar_frames or not hasattr(self, "avatar_frame_label"):
+            return
+
+        if len(self.avatar_frames) == 1:
+            indice = 0
+        else:
+            opciones = list(range(len(self.avatar_frames)))
+            if self.ultimo_avatar in opciones:
+                opciones.remove(self.ultimo_avatar)
+            indice = random.choice(opciones)
+
+        self.ultimo_avatar = indice
+        imagen = self.avatar_frames[indice]
+        self.avatar_frame_label.configure(image=imagen, text="")
+        self.avatar_frame_label.image = imagen
 
     def crear_interfaz(self):
         # Contenedor general (Main grid)
@@ -1212,6 +1248,20 @@ class TraductorLSMApp:
         )
         descripcion.pack(anchor="w", padx=15, pady=(0, 10))
 
+        avatar_container = ctk.CTkFrame(anim_frame, fg_color="#F7F7F7", border_width=1, border_color="#D3D3D3")
+        avatar_container.pack(fill="x", padx=15, pady=(0, 10))
+
+        avatar_titulo = ctk.CTkLabel(
+            avatar_container,
+            text="Avatar",
+            font=("Segoe UI", 12, "bold"),
+            text_color="#4B4B4B"
+        )
+        avatar_titulo.pack(anchor="w", padx=10, pady=(8, 4))
+
+        self.avatar_frame_label = ctk.CTkLabel(avatar_container, text="")
+        self.avatar_frame_label.pack(padx=10, pady=(0, 10))
+
         # Contenedor de la lista (un sutil borde alrededor)
         rectangulo = ctk.CTkFrame(anim_frame, fg_color="transparent", border_width=2, border_color="#D3D3D3")
         rectangulo.pack(fill="both", expand=True, padx=15, pady=10)
@@ -1244,6 +1294,7 @@ class TraductorLSMApp:
         self.btn_siguiente.pack(side="left")
 
         self.indice_animacion = 0
+        self.actualizar_frame_avatar()
 
     # =====================================================
     # LÓGICA Y ACCIONES (Se mantienen igual de eficientes)
@@ -1290,15 +1341,16 @@ class TraductorLSMApp:
             self.animacion_lista.selection_set(0)
             self.animacion_lista.activate(0)
             self.animacion_lista.see(0)
+            self.actualizar_frame_avatar()
 
     def toggle_tecnico(self):
         if self.tecnico_visible:
             self.tecnico_frame.pack_forget()
-            self.btn_ojo.configure(text="👁 Mostrar técnico")
+            self.btn_ojo.configure(text="Mostrar técnico")
             self.tecnico_visible = False
         else:
             self.tecnico_frame.pack(fill="both", expand=True, pady=(10, 0))
-            self.btn_ojo.configure(text="🙈 Ocultar técnico")
+            self.btn_ojo.configure(text="Ocultar técnico")
             self.tecnico_visible = True
 
     def limpiar(self):
@@ -1325,6 +1377,7 @@ class TraductorLSMApp:
         self.animacion_lista.selection_set(self.indice_animacion)
         self.animacion_lista.activate(self.indice_animacion)
         self.animacion_lista.see(self.indice_animacion)
+        self.actualizar_frame_avatar()
 
     def reproducir_demo(self):
         total = self.animacion_lista.size()
@@ -1341,13 +1394,9 @@ class TraductorLSMApp:
         self.root.after(700, self.reproducir_paso)
 
 
-# =========================================================
-# EJECUTAR APP MODERNA
-# =========================================================
 if __name__ == "__main__":
-    # Inicializamos con CustomTkinter para habilitar los temas modernos nativos
-    ctk.set_appearance_mode("Light")  # Opciones: "Light", "Dark", "System"
-    ctk.set_default_color_theme("blue")  # Opciones: "blue", "green", "dark-blue"
+    ctk.set_appearance_mode("Light") 
+    ctk.set_default_color_theme("blue") 
 
     root = ctk.CTk()
     app = TraductorLSMApp(root)
