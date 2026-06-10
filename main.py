@@ -1,3 +1,17 @@
+"""Traductor de espanol a glosa para LSM.
+
+El modulo combina tres capas:
+- reglas linguisticas para convertir texto en eventos estructurados;
+- funciones de salida que ordenan esos eventos como glosa tecnica o visible;
+- una interfaz de escritorio para probar la traduccion y animar sus tokens.
+
+La estructura interna mas importante es el diccionario ``evento``. Cada evento
+representa una accion con campos como tiempo, lugar, sujeto, objeto, verbo,
+modal, negacion y conector. Las funciones de construccion de glosa consumen
+esa estructura para mantener separada la extraccion linguistica del formato
+mostrado al usuario.
+"""
+
 import spacy
 
 nlp = spacy.load("es_core_news_lg")
@@ -68,10 +82,18 @@ VERBOS_MODALES = {
 # ==========================
 
 def es_interrogativo(token):
+    """Indica si el token corresponde a una palabra interrogativa conocida."""
+
     return token.text.lower() in INTERROGATIVOS
 
 
 def obtener_glosa(token):
+    """Devuelve la glosa base de un token segun diccionarios y lema.
+
+    La prioridad es: interrogativos, verbos normalizados, sustantivos
+    normalizados y, como respaldo, el lema del token en mayusculas.
+    """
+
     texto = token.text.lower()
     lema = token.lemma_.lower()
 
@@ -93,10 +115,18 @@ def obtener_glosa(token):
 
 
 def es_plural(token):
+    """Comprueba si spaCy marco el token como plural."""
+
     return "Number=Plur" in str(token.morph)
 
 
 def obtener_cantidad(token):
+    """Extrae una cantidad asociada al sustantivo si existe.
+
+    Acepta modificadores numerales de spaCy y cuantificadores frecuentes como
+    "muchos", "varias" o "pocos".
+    """
+
     for hijo in token.children:
 
         # Números explícitos: dos, tres, cuatro...
@@ -113,6 +143,8 @@ def obtener_cantidad(token):
 
 
 def obtener_posesivo(token):
+    """Busca determinantes posesivos dentro del grupo nominal del token."""
+
     for hijo in token.children:
         texto = hijo.text.lower()
 
@@ -135,6 +167,12 @@ def obtener_posesivo(token):
 
 
 def obtener_grupo_nominal(token):
+    """Construye la glosa de un grupo nominal.
+
+    El orden usado para LSM es posesivo, sustantivo, adjetivos y cantidad. Si
+    no hay cantidad explicita, conserva la pluralidad mediante ``(PL)``.
+    """
+
     cantidad = obtener_cantidad(token)
     posesivo = obtener_posesivo(token)
     palabra = obtener_glosa(token)
@@ -199,6 +237,8 @@ def buscar_sujeto_cercano(token):
     return ""
 
 def inferir_sujeto_desde_verbo(token):
+    """Infere pronombres sujeto a partir de persona y numero verbal."""
+
     person = token.morph.get("Person")
     number = token.morph.get("Number")
 
@@ -224,6 +264,12 @@ def inferir_sujeto_desde_verbo(token):
 
 
 def es_posible_verbo(token):
+    """Determina si un token puede funcionar como verbo de un evento.
+
+    Ademas del etiquetado POS normal, incluye una heuristica para raices que
+    spaCy puede confundir con nombres propios en frases cortas.
+    """
+
     if token.pos_ in ["VERB", "AUX"]:
         return True
 
@@ -244,6 +290,12 @@ def es_posible_verbo(token):
 
 
 def detectar_pregunta(doc):
+    """Devuelve el tipo de pregunta detectado o ``None`` si no hay pregunta.
+
+    Solo activa la deteccion cuando el texto contiene signos de interrogacion,
+    para no tratar palabras como "cuando" o "como" como preguntas indirectas.
+    """
+
     # Solo detectar pregunta si realmente hay signos de pregunta
     if "¿" not in doc.text and "?" not in doc.text:
         return None
@@ -372,6 +424,11 @@ def buscar_verbo_accion_cercano(token):
 # ==========================
 
 def extraer_evento_verbo_encadenado(token):
+    """Extrae un evento para construcciones con modal mas infinitivo.
+
+    Ejemplos: "quiere comer", "puede comprar", "tiene que estudiar". La accion
+    principal queda en ``verbo`` y el verbo modal queda en ``modal``.
+    """
 
     evento = {
         "tiempo": "",
@@ -454,6 +511,12 @@ def extraer_evento_verbo_encadenado(token):
 # ==========================
 
 def es_verbo_ambiguo_en_contexto(tokens, i):
+    """Decide si una palabra ambigua debe tratarse como verbo.
+
+    Palabras como "cocina", "limpia" o "estudio" pueden ser sustantivo,
+    adjetivo o verbo; esta funcion usa contexto cercano para resolverlo.
+    """
+
     token = tokens[i]
     texto = token.text.lower()
 
@@ -488,6 +551,7 @@ def es_verbo_ambiguo_en_contexto(tokens, i):
 
 
 def extraer_eventos_ambiguos(doc):
+    """Construye eventos para casos que el analisis POS no detecto como verbos."""
 
     eventos = []
     tokens = list(doc)
@@ -560,6 +624,13 @@ def extraer_eventos_ambiguos(doc):
 # ==========================
 
 def extraer_eventos(doc):
+    """Extrae los eventos semanticos principales de una oracion analizada.
+
+    Recorre los tokens del documento, detecta verbos normales y encadenados,
+    recupera sujeto, objeto, lugar, tiempo, negacion y conectores, y usa un
+    segundo pase heuristico cuando no se encontro ningun evento.
+    """
+
     eventos = []
     tokens_usados = set()
     tiempo_global = obtener_tiempo_global(doc)
@@ -968,13 +1039,502 @@ if __name__ == "__main__":
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+# ==========================
+# PRUEBAS DE CONFIABILIDAD
+# 50 FRASES
+# ==========================
 
+casos_prueba = [
+    # ==========================
+    # 1. ORACIONES SIMPLES
+    # ==========================
+    {
+        "categoria": "simple",
+        "oracion": "El gato duerme.",
+        "esperada_tecnica": "GATO DORMIR",
+        "esperada_visible": "GATO DORMIR"
+    },
+    {
+        "categoria": "simple",
+        "oracion": "El perro corre.",
+        "esperada_tecnica": "PERRO CORRER",
+        "esperada_visible": "PERRO CORRER"
+    },
+    {
+        "categoria": "simple",
+        "oracion": "Juan come una manzana.",
+        "esperada_tecnica": "JUAN MANZANA COMER",
+        "esperada_visible": "JUAN MANZANA COMER"
+    },
+    {
+        "categoria": "simple",
+        "oracion": "María lee un libro.",
+        "esperada_tecnica": "MARÍA LIBRO LEER",
+        "esperada_visible": "MARÍA LIBRO LEER"
+    },
+    {
+        "categoria": "simple",
+        "oracion": "La niña canta.",
+        "esperada_tecnica": "NIÑA CANTAR",
+        "esperada_visible": "NIÑA CANTAR"
+    },
+
+    # ==========================
+    # 2. LUGAR / CONTEXTO
+    # ==========================
+    {
+        "categoria": "lugar",
+        "oracion": "El gato negro duerme en la cama.",
+        "esperada_tecnica": "CAMA GATO NEGRO DORMIR",
+        "esperada_visible": "CAMA GATO NEGRO DORMIR"
+    },
+    {
+        "categoria": "lugar",
+        "oracion": "Los niños juegan en el parque.",
+        "esperada_tecnica": "PARQUE NIÑO(PL) JUGAR",
+        "esperada_visible": "PARQUE NIÑO(PL) JUGAR"
+    },
+    {
+        "categoria": "lugar",
+        "oracion": "La niña pequeña corre en la escuela.",
+        "esperada_tecnica": "ESCUELA NIÑA PEQUEÑO CORRER",
+        "esperada_visible": "ESCUELA NIÑA PEQUEÑO CORRER"
+    },
+    {
+        "categoria": "lugar",
+        "oracion": "Juan estudia en la biblioteca.",
+        "esperada_tecnica": "BIBLIOTECA JUAN ESTUDIAR",
+        "esperada_visible": "BIBLIOTECA JUAN ESTUDIAR"
+    },
+    {
+        "categoria": "lugar",
+        "oracion": "Mi papá trabaja en la oficina.",
+        "esperada_tecnica": "OFICINA MI PAPÁ TRABAJAR",
+        "esperada_visible": "OFICINA MI PAPÁ TRABAJAR"
+    },
+
+    # ==========================
+    # 3. TIEMPO
+    # ==========================
+    {
+        "categoria": "tiempo",
+        "oracion": "Ayer Juan compró pan.",
+        "esperada_tecnica": "AYER JUAN PAN COMPRAR",
+        "esperada_visible": "AYER JUAN PAN COMPRAR"
+    },
+    {
+        "categoria": "tiempo",
+        "oracion": "Hoy María estudia.",
+        "esperada_tecnica": "HOY MARÍA ESTUDIAR",
+        "esperada_visible": "HOY MARÍA ESTUDIAR"
+    },
+    {
+        "categoria": "tiempo",
+        "oracion": "Mañana los niños juegan.",
+        "esperada_tecnica": "MAÑANA NIÑO(PL) JUGAR",
+        "esperada_visible": "MAÑANA NIÑO(PL) JUGAR"
+    },
+    {
+        "categoria": "tiempo",
+        "oracion": "Ahora el perro duerme.",
+        "esperada_tecnica": "AHORA PERRO DORMIR",
+        "esperada_visible": "AHORA PERRO DORMIR"
+    },
+    {
+        "categoria": "tiempo",
+        "oracion": "Después mi mamá cocina.",
+        "esperada_tecnica": "DESPUÉS MI MAMÁ COCINAR",
+        "esperada_visible": "DESPUÉS MI MAMÁ COCINAR"
+    },
+
+    # ==========================
+    # 4. PLURAL Y CANTIDAD
+    # ==========================
+    {
+        "categoria": "plural_cantidad",
+        "oracion": "Los perros corren.",
+        "esperada_tecnica": "PERRO(PL) CORRER",
+        "esperada_visible": "PERRO(PL) CORRER"
+    },
+    {
+        "categoria": "plural_cantidad",
+        "oracion": "Dos perros corren.",
+        "esperada_tecnica": "PERRO DOS CORRER",
+        "esperada_visible": "PERRO DOS CORRER"
+    },
+    {
+        "categoria": "plural_cantidad",
+        "oracion": "Tres niños juegan en el parque.",
+        "esperada_tecnica": "PARQUE NIÑO TRES JUGAR",
+        "esperada_visible": "PARQUE NIÑO TRES JUGAR"
+    },
+    {
+        "categoria": "plural_cantidad",
+        "oracion": "Muchos estudiantes estudian.",
+        "esperada_tecnica": "ESTUDIANTE MUCHO ESTUDIAR",
+        "esperada_visible": "ESTUDIANTE MUCHO ESTUDIAR"
+    },
+    {
+        "categoria": "plural_cantidad",
+        "oracion": "Ayer compré tres libros nuevos en la biblioteca.",
+        "esperada_tecnica": "AYER BIBLIOTECA YO LIBRO NUEVO TRES COMPRAR",
+        "esperada_visible": "AYER BIBLIOTECA YO LIBRO NUEVO TRES COMPRAR"
+    },
+
+    # ==========================
+    # 5. NEGACIÓN
+    # ==========================
+    {
+        "categoria": "negacion",
+        "oracion": "El perro no duerme.",
+        "esperada_tecnica": "PERRO DORMIR<NEG>",
+        "esperada_visible": "PERRO DORMIR<NEG>"
+    },
+    {
+        "categoria": "negacion",
+        "oracion": "Juan no come una manzana.",
+        "esperada_tecnica": "JUAN MANZANA COMER<NEG>",
+        "esperada_visible": "JUAN MANZANA COMER<NEG>"
+    },
+    {
+        "categoria": "negacion",
+        "oracion": "Los niños no juegan en el parque.",
+        "esperada_tecnica": "PARQUE NIÑO(PL) JUGAR<NEG>",
+        "esperada_visible": "PARQUE NIÑO(PL) JUGAR<NEG>"
+    },
+    {
+        "categoria": "negacion",
+        "oracion": "María no lee el libro.",
+        "esperada_tecnica": "MARÍA LIBRO LEER<NEG>",
+        "esperada_visible": "MARÍA LIBRO LEER<NEG>"
+    },
+    {
+        "categoria": "negacion",
+        "oracion": "Mi hermano no trabaja.",
+        "esperada_tecnica": "MI HERMANO TRABAJAR<NEG>",
+        "esperada_visible": "MI HERMANO TRABAJAR<NEG>"
+    },
+
+    # ==========================
+    # 6. PREGUNTAS
+    # ==========================
+    {
+        "categoria": "pregunta",
+        "oracion": "¿Dónde está el perro?",
+        "esperada_tecnica": "PERRO ESTAR DONDE<?>",
+        "esperada_visible": "PERRO ESTAR DONDE<?>"
+    },
+    {
+        "categoria": "pregunta",
+        "oracion": "¿Qué come Juan?",
+        "esperada_tecnica": "JUAN COMER QUE<?>",
+        "esperada_visible": "JUAN COMER QUE<?>"
+    },
+    {
+        "categoria": "pregunta",
+        "oracion": "¿Cuándo juegan los niños?",
+        "esperada_tecnica": "NIÑO(PL) JUGAR CUANDO<?>",
+        "esperada_visible": "NIÑO(PL) JUGAR CUANDO<?>"
+    },
+    {
+        "categoria": "pregunta",
+        "oracion": "¿Los niños juegan?",
+        "esperada_tecnica": "NIÑO(PL) JUGAR<?>",
+        "esperada_visible": "NIÑO(PL) JUGAR<?>"
+    },
+    {
+        "categoria": "pregunta",
+        "oracion": "¿Juan no come?",
+        "esperada_tecnica": "JUAN COMER<NEG><?>",
+        "esperada_visible": "JUAN COMER<NEG><?>"
+    },
+
+    # ==========================
+    # 7. POSESIVOS
+    # ==========================
+    {
+        "categoria": "posesivo",
+        "oracion": "Mi mamá cocina.",
+        "esperada_tecnica": "MI MAMÁ COCINAR",
+        "esperada_visible": "MI MAMÁ COCINAR"
+    },
+    {
+        "categoria": "posesivo",
+        "oracion": "Mi papá limpia la casa.",
+        "esperada_tecnica": "MI PAPÁ CASA LIMPIAR",
+        "esperada_visible": "MI PAPÁ CASA LIMPIAR"
+    },
+    {
+        "categoria": "posesivo",
+        "oracion": "Tu hermano lee un libro.",
+        "esperada_tecnica": "TU HERMANO LIBRO LEER",
+        "esperada_visible": "TU HERMANO LIBRO LEER"
+    },
+    {
+        "categoria": "posesivo",
+        "oracion": "Su hermana compra flores.",
+        "esperada_tecnica": "SU HERMANA FLOR(PL) COMPRAR",
+        "esperada_visible": "SU HERMANA FLOR(PL) COMPRAR"
+    },
+    {
+        "categoria": "posesivo",
+        "oracion": "Nuestro amigo estudia en la escuela.",
+        "esperada_tecnica": "ESCUELA NUESTRO AMIGO ESTUDIAR",
+        "esperada_visible": "ESCUELA NUESTRO AMIGO ESTUDIAR"
+    },
+
+    # ==========================
+    # 8. VERBOS ENCADENADOS / MODALES
+    # ==========================
+    {
+        "categoria": "modal",
+        "oracion": "Juan quiere comer la manzana verde.",
+        "esperada_tecnica": "JUAN MANZANA VERDE COMER QUERER",
+        "esperada_visible": "JUAN MANZANA VERDE COMER QUERER"
+    },
+    {
+        "categoria": "modal",
+        "oracion": "Juan no quiere comer la manzana verde.",
+        "esperada_tecnica": "JUAN MANZANA VERDE COMER QUERER<NEG>",
+        "esperada_visible": "JUAN MANZANA VERDE COMER QUERER<NEG>"
+    },
+    {
+        "categoria": "modal",
+        "oracion": "Los niños no saben leer.",
+        "esperada_tecnica": "NIÑO(PL) LEER SABER<NEG>",
+        "esperada_visible": "NIÑO(PL) LEER SABER<NEG>"
+    },
+    {
+        "categoria": "modal",
+        "oracion": "Tu amigo quiere leer un libro nuevo en la biblioteca.",
+        "esperada_tecnica": "BIBLIOTECA TU AMIGO LIBRO NUEVO LEER QUERER",
+        "esperada_visible": "BIBLIOTECA TU AMIGO LIBRO NUEVO LEER QUERER"
+    },
+    {
+        "categoria": "modal",
+        "oracion": "Hoy mi hermana no puede comprar dos flores rojas en el mercado.",
+        "esperada_tecnica": "HOY MERCADO MI HERMANA FLOR ROJO DOS COMPRAR PODER<NEG>",
+        "esperada_visible": "HOY MERCADO MI HERMANA FLOR ROJO DOS COMPRAR PODER<NEG>"
+    },
+
+    # ==========================
+    # 9. CONECTORES
+    # ==========================
+    {
+        "categoria": "conector",
+        "oracion": "Mi mamá cocina mientras mi papá limpia la casa.",
+        "esperada_tecnica": "MI MAMÁ COCINAR\n[MIENTRAS]\nMI PAPÁ CASA LIMPIAR",
+        "esperada_visible": "MI MAMÁ COCINAR / MI PAPÁ CASA LIMPIAR"
+    },
+    {
+        "categoria": "conector",
+        "oracion": "Los niños juegan en el parque mientras los adultos conversan.",
+        "esperada_tecnica": "PARQUE NIÑO(PL) JUGAR\n[MIENTRAS]\nADULTO(PL) HABLAR",
+        "esperada_visible": "PARQUE NIÑO(PL) JUGAR / ADULTO(PL) HABLAR"
+    },
+    {
+        "categoria": "conector",
+        "oracion": "Cuando llego a casa, el perro duerme.",
+        "esperada_tecnica": "[CUANDO]\nCASA YO LLEGAR\nPERRO DORMIR",
+        "esperada_visible": "CASA YO LLEGAR / PERRO DORMIR"
+    },
+    {
+        "categoria": "conector",
+        "oracion": "Estudio porque mañana hay examen.",
+        "esperada_tecnica": "YO ESTUDIAR\n[PORQUE]\nMAÑANA EXAMEN EXISTIR",
+        "esperada_visible": "MAÑANA EXAMEN / YO ESTUDIAR"
+    },
+    {
+        "categoria": "conector",
+        "oracion": "Mañana los estudiantes tienen que estudiar en la escuela porque hay examen.",
+        "esperada_tecnica": "MAÑANA ESCUELA ESTUDIANTE(PL) ESTUDIAR TENER\n[PORQUE]\nEXAMEN EXISTIR",
+        "esperada_visible": "MAÑANA ESCUELA ESTUDIANTE(PL) EXAMEN / ESTUDIAR TENER"
+    },
+
+    # ==========================
+    # 10. MIXTAS / UN POCO MÁS DIFÍCILES
+    # ==========================
+    {
+        "categoria": "mixta",
+        "oracion": "¿Dónde compró Juan tres panes grandes ayer?",
+        "esperada_tecnica": "AYER JUAN PAN GRANDE TRES COMPRAR DONDE<?>",
+        "esperada_visible": "AYER JUAN PAN GRANDE TRES COMPRAR DONDE<?>"
+    },
+    {
+        "categoria": "mixta",
+        "oracion": "¿Tu hermano no quiere comer la sopa fría?",
+        "esperada_tecnica": "TU HERMANO SOPA FRÍO COMER QUERER<NEG><?>",
+        "esperada_visible": "TU HERMANO SOPA FRÍO COMER QUERER<NEG><?>"
+    },
+    {
+        "categoria": "mixta",
+        "oracion": "Los gatos pequeños duermen en la silla mientras el perro come sopa.",
+        "esperada_tecnica": "SILLA GATO(PL) PEQUEÑO DORMIR\n[MIENTRAS]\nPERRO SOPA COMER",
+        "esperada_visible": "SILLA GATO(PL) PEQUEÑO DORMIR / PERRO SOPA COMER"
+    },
+    {
+        "categoria": "mixta",
+        "oracion": "¿Por qué los estudiantes no quieren estudiar mañana en la escuela?",
+        "esperada_tecnica": "MAÑANA ESCUELA ESTUDIANTE(PL) ESTUDIAR QUERER<NEG> PORQUE<?>",
+        "esperada_visible": "MAÑANA ESCUELA ESTUDIANTE(PL) ESTUDIAR QUERER<NEG> PORQUE<?>"
+    },
+    {
+        "categoria": "mixta",
+        "oracion": "¿Por qué el perro grande persigue al gato en el jardín?",
+        "esperada_tecnica": "JARDÍN PERRO GRANDE GATO PERSEGUIR PORQUE<?>",
+        "esperada_visible": "JARDÍN PERRO GRANDE GATO PERSEGUIR PORQUE<?>"
+    },
+]
+
+
+def normalizar_glosa(glosa):
+    """
+    Normaliza una glosa para comparaciones en pruebas.
+
+    Limpia espacios repetidos y lineas vacias, pero conserva los saltos de
+    linea significativos porque la glosa tecnica usa conectores en lineas
+    separadas.
+    """
+
+    lineas = glosa.strip().splitlines()
+    lineas_limpias = []
+
+    for linea in lineas:
+        linea_limpia = " ".join(linea.strip().split())
+        if linea_limpia:
+            lineas_limpias.append(linea_limpia)
+
+    return "\n".join(lineas_limpias)
+
+
+def evaluar_casos():
+    """Ejecuta el banco de pruebas y reporta aciertos por tipo de glosa."""
+
+    total = len(casos_prueba)
+
+    aciertos_tecnica = 0
+    aciertos_visible = 0
+
+    resultados = []
+
+    resumen_categorias = {}
+
+    for i, caso in enumerate(casos_prueba, start=1):
+        categoria = caso["categoria"]
+        oracion = caso["oracion"]
+
+        esperada_tecnica = normalizar_glosa(caso["esperada_tecnica"])
+        esperada_visible = normalizar_glosa(caso["esperada_visible"])
+
+        try:
+            obtenida_tecnica = normalizar_glosa(
+                traducir_a_glosa_lsm_tecnica(oracion)
+            )
+
+            obtenida_visible = normalizar_glosa(
+                traducir_a_glosa_lsm_natural(oracion)
+            )
+
+        except Exception as e:
+            obtenida_tecnica = f"ERROR: {e}"
+            obtenida_visible = f"ERROR: {e}"
+
+        ok_tecnica = obtenida_tecnica == esperada_tecnica
+        ok_visible = obtenida_visible == esperada_visible
+
+        if ok_tecnica:
+            aciertos_tecnica += 1
+
+        if ok_visible:
+            aciertos_visible += 1
+
+        if categoria not in resumen_categorias:
+            resumen_categorias[categoria] = {
+                "total": 0,
+                "tecnica": 0,
+                "visible": 0
+            }
+
+        resumen_categorias[categoria]["total"] += 1
+
+        if ok_tecnica:
+            resumen_categorias[categoria]["tecnica"] += 1
+
+        if ok_visible:
+            resumen_categorias[categoria]["visible"] += 1
+
+        resultados.append({
+            "numero": i,
+            "categoria": categoria,
+            "oracion": oracion,
+            "esperada_tecnica": esperada_tecnica,
+            "obtenida_tecnica": obtenida_tecnica,
+            "ok_tecnica": ok_tecnica,
+            "esperada_visible": esperada_visible,
+            "obtenida_visible": obtenida_visible,
+            "ok_visible": ok_visible
+        })
+
+    porcentaje_tecnica = (aciertos_tecnica / total) * 100
+    porcentaje_visible = (aciertos_visible / total) * 100
+
+    print("=== RESULTADO GENERAL ===")
+    print(f"Total de frases: {total}")
+    print(f"Aciertos glosa técnica: {aciertos_tecnica}/{total} = {porcentaje_tecnica:.2f}%")
+    print(f"Aciertos glosa visible: {aciertos_visible}/{total} = {porcentaje_visible:.2f}%")
+    print()
+
+    print("=== RESULTADO POR CATEGORÍA ===")
+    for categoria, datos in resumen_categorias.items():
+        total_cat = datos["total"]
+        pct_tec = (datos["tecnica"] / total_cat) * 100
+        pct_vis = (datos["visible"] / total_cat) * 100
+
+        print(
+            f"{categoria}: "
+            f"Técnica {datos['tecnica']}/{total_cat} = {pct_tec:.2f}% | "
+            f"Visible {datos['visible']}/{total_cat} = {pct_vis:.2f}%"
+        )
+
+    print()
+    print("=== ERRORES DETECTADOS ===")
+
+    hubo_errores = False
+
+    for r in resultados:
+        if not r["ok_tecnica"] or not r["ok_visible"]:
+            hubo_errores = True
+
+            print(f"\nCaso {r['numero']} [{r['categoria']}]")
+            print(f"Original: {r['oracion']}")
+
+            if not r["ok_tecnica"]:
+                print("Glosa técnica incorrecta:")
+                print("Esperada:")
+                print(r["esperada_tecnica"])
+                print("Obtenida:")
+                print(r["obtenida_tecnica"])
+
+            if not r["ok_visible"]:
+                print("Glosa visible incorrecta:")
+                print("Esperada:")
+                print(r["esperada_visible"])
+                print("Obtenida:")
+                print(r["obtenida_visible"])
+
+    if not hubo_errores:
+        print("No hubo errores. Todas las frases coincidieron.")
+
+
+if __name__ == "__main__":
+    evaluar_casos()
 # =========================================================
 # UTILIDADES PARA LA INTERFAZ
 # =========================================================
 
 
 def tokenizar_glosa_para_animacion(glosa):
+    """Convierte una glosa multilinea en tokens secuenciales para la animacion."""
 
     tokens = []
 
@@ -991,6 +1551,7 @@ def tokenizar_glosa_para_animacion(glosa):
 
 
 def obtener_datos_tecnicos(texto, glosa):
+    """Genera el texto de depuracion mostrado en el panel tecnico."""
 
     lineas = []
 
@@ -1030,8 +1591,15 @@ from glob import glob
 # =========================================================
 
 class TraductorLSMApp:
+    """Interfaz grafica del traductor LSM.
+
+    Administra la entrada del usuario, la salida en glosa visible, el panel
+    tecnico y la lista de tokens que simula la secuencia de animacion.
+    """
 
     def __init__(self, root):
+        """Inicializa estado de la ventana y construye la interfaz."""
+
         self.root = root
         self.root.title("Traductor Español → Glosa LSM")
         self.root.geometry("1100x650")
@@ -1044,6 +1612,8 @@ class TraductorLSMApp:
         self.crear_interfaz()
 
     def cargar_frames_avatar(self):
+        """Carga imagenes PNG del avatar desde la carpeta ``similar``."""
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         patron = os.path.join(base_dir, "similar", "simibailando (*.png")
         rutas = sorted(glob(patron))
@@ -1058,6 +1628,8 @@ class TraductorLSMApp:
         return frames
 
     def actualizar_frame_avatar(self):
+        """Muestra un frame aleatorio del avatar evitando repetir el anterior."""
+
         if not self.avatar_frames or not hasattr(self, "avatar_frame_label"):
             return
 
@@ -1075,6 +1647,8 @@ class TraductorLSMApp:
         self.avatar_frame_label.image = imagen
 
     def crear_interfaz(self):
+        """Crea la estructura general de la ventana."""
+
         # Contenedor general (Main grid)
         # Usamos un CTkFrame transparente para que actúe como el 'main' original
         main = ctk.CTkFrame(self.root, fg_color="transparent")
@@ -1116,6 +1690,8 @@ class TraductorLSMApp:
         self.crear_panel_derecho()
 
     def crear_panel_con_sombra(self, parent, corner_radius=12, fg_color="#FFFFFF"):
+        """Crea un contenedor reutilizable con borde y radio de esquina."""
+
         contenedor = ctk.CTkFrame(parent, fg_color="transparent")
 
         panel = ctk.CTkFrame(
@@ -1130,6 +1706,8 @@ class TraductorLSMApp:
         return contenedor, panel
 
     def crear_panel_izquierdo(self):
+        """Construye los controles de entrada, botones, glosa y detalles."""
+
         # --- ENTRADA (Panel con sombra y bordes redondeados automática) ---
         # 'corner_radius' se encarga de redondearlo y darle un aspecto moderno
         entrada_container, entrada_frame = self.crear_panel_con_sombra(self.panel_izquierdo)
@@ -1229,6 +1807,8 @@ class TraductorLSMApp:
         self.texto_tecnico.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
     def crear_panel_derecho(self):
+        """Construye la vista de avatar, lista de tokens y controles."""
+
         # --- PANEL DE ANIMACIÓN ---
         anim_container, anim_frame = self.crear_panel_con_sombra(self.panel_derecho)
         anim_container.pack(fill="both", expand=True)
@@ -1301,6 +1881,8 @@ class TraductorLSMApp:
     # =====================================================
 
     def traducir(self):
+        """Traduce el texto escrito y actualiza glosa, detalles y animacion."""
+
         texto = self.texto_entrada.get("1.0", "end").strip()
 
         if not texto:
@@ -1330,6 +1912,8 @@ class TraductorLSMApp:
         self.texto_tecnico.insert("1.0", tecnico)
 
     def actualizar_animacion(self, glosa):
+        """Refresca la lista visual con los tokens de la glosa visible."""
+
         self.animacion_lista.delete(0, "end")
         tokens = tokenizar_glosa_para_animacion(glosa)
 
@@ -1344,6 +1928,8 @@ class TraductorLSMApp:
             self.actualizar_frame_avatar()
 
     def toggle_tecnico(self):
+        """Muestra u oculta el panel con datos tecnicos."""
+
         if self.tecnico_visible:
             self.tecnico_frame.pack_forget()
             self.btn_ojo.configure(text="Mostrar técnico")
@@ -1354,6 +1940,8 @@ class TraductorLSMApp:
             self.tecnico_visible = True
 
     def limpiar(self):
+        """Limpia entrada, salidas y estado de animacion."""
+
         self.texto_entrada.delete("1.0", "end")
         self.texto_glosa.delete("1.0", "end")
         self.texto_tecnico.delete("1.0", "end")
@@ -1361,18 +1949,24 @@ class TraductorLSMApp:
         self.indice_animacion = 0
 
     def animacion_anterior(self):
+        """Selecciona el token anterior en la secuencia de animacion."""
+
         total = self.animacion_lista.size()
         if total == 0: return
         self.indice_animacion = max(0, self.indice_animacion - 1)
         self.seleccionar_animacion_actual()
 
     def animacion_siguiente(self):
+        """Selecciona el siguiente token en la secuencia de animacion."""
+
         total = self.animacion_lista.size()
         if total == 0: return
         self.indice_animacion = min(total - 1, self.indice_animacion + 1)
         self.seleccionar_animacion_actual()
 
     def seleccionar_animacion_actual(self):
+        """Sincroniza la seleccion visual con ``indice_animacion``."""
+
         self.animacion_lista.selection_clear(0, "end")
         self.animacion_lista.selection_set(self.indice_animacion)
         self.animacion_lista.activate(self.indice_animacion)
@@ -1380,12 +1974,16 @@ class TraductorLSMApp:
         self.actualizar_frame_avatar()
 
     def reproducir_demo(self):
+        """Inicia la reproduccion automatica de la secuencia actual."""
+
         total = self.animacion_lista.size()
         if total == 0: return
         self.indice_animacion = 0
         self.reproducir_paso()
 
     def reproducir_paso(self):
+        """Avanza un paso de la reproduccion automatica."""
+
         total = self.animacion_lista.size()
         if self.indice_animacion >= total: return
 
