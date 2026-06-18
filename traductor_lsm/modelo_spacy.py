@@ -2,4 +2,9 @@
 
 import spacy
 
-nlp = spacy.load("es_core_news_lg")
+try:
+    import es_core_news_lg
+
+    nlp = es_core_news_lg.load()
+except ImportError:
+    nlp = spacy.load("es_core_news_lg")

@@ -9,11 +9,10 @@ from tkinter import messagebox
 import customtkinter as ctk
 import os
 import random
+import sys
 from glob import glob
 
 if __package__ in (None, ""):
-    import sys
-
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from traductor_lsm.interfaz_utilidades import (
@@ -33,6 +32,17 @@ else:
         traducir_a_glosa_lsm_natural,
         traducir_a_glosa_lsm_tecnica,
     )
+
+
+def obtener_ruta_recurso(*partes):
+    """Devuelve rutas validas en desarrollo y dentro del .exe de PyInstaller."""
+
+    if hasattr(sys, "_MEIPASS"):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    return os.path.join(base_dir, *partes)
 
 
 class TraductorLSMApp:
@@ -59,8 +69,7 @@ class TraductorLSMApp:
     def cargar_frames_avatar(self):
         """Carga imagenes PNG del avatar desde la carpeta ``similar``."""
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        patron = os.path.join(base_dir, "similar", "simibailando (*.png")
+        patron = obtener_ruta_recurso("similar", "simibailando (*.png")
         rutas = sorted(glob(patron))
 
         frames = []

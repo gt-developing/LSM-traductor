@@ -143,4 +143,3 @@ python -m traductor_lsm.pruebas
 Este proyecto es un prototipo academico/en desarrollo. La salida depende del
 analisis de spaCy y de las reglas definidas en los modulos de analisis,
 glosarios y construccion de glosa.
-
